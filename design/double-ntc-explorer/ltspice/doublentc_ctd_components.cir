@@ -1,0 +1,156 @@
+* DoubleNTC constant-delta-T flow sensor -- COMPONENT-LEVEL verification (LTspice)
+* ================================================================================
+* Unlike doublentc_ctd_loop.cir (which abstracts the electronics into B-sources),
+* this netlist builds the ACTUAL analog circuit out of components, so you can verify
+* the real hardware: the NTC Beta-model thermistors, the Wheatstone bridge dividers,
+* op-amp difference amp + PI integrator (with output clamp / anti-windup), an op-amp
+* PWM comparator, a power MOSFET switching a 12 V heater, and the current-sense
+* amplifier the ESP32's ADC reads.  Only the thermal PLANT and the PWM carrier are
+* still modelled behaviourally (the plant is physics, not a circuit; the carrier
+* stands in for a 555 / op-amp relaxation oscillator -- a component version of that
+* is given in comments at the foot of the file).
+*
+* Self-contained: the op-amp is a single-pole macromodel defined below (subckt OPAMP),
+* the MOSFET is an inline VDMOS .model -- NO external library files are required.
+*
+* Thermal <-> electrical analogy for the PLANT:  V[node]=degC, B-current=W, R=K/W, C=J/K
+*
+* HOW TO RUN: open in LTspice (File > Open), Run.
+* WHAT TO LOOK AT:
+*   V(Tdn)            heated-element temp -> climbs from 20 and HOLDS at fluid+dT = 30
+*   V(Th)             heater-body temp    -> ~60 C (still) / ~82 C (flow)  [feasible]
+*   V(nodeL),V(nodeR) the two bridge midpoints -> converge as the loop balances
+*   V(vctrl)          PI output / duty demand (clamped ~0..1)
+*   V(gate),V(nd)     MOSFET gate drive and the switched heater node
+*   V(vadc)           current-sense ADC voltage -> numerically equals I_avg [A]
+*                     (transresistance 1 V/A): ~ flow signal the ESP32 digitises
+* A flow step at t = 18 s (Gf 1.0 -> 1.746 W/K) makes the loop raise heater power to
+* keep V(Tdn) pinned at 30 -> watch V(vadc) (and duty) step up.
+*
+* VERIFIED in LTspice 17.2.4 (this .cir): holds V(Tdn) ~30 C (29.8 still / 30.0 flow),
+* V(Th) ~59 C (still) / ~82 C (flow), and the current-sense I_avg steps 0.91 -> 1.50 A
+* at the flow step -- i.e. true constant-dT regulation. The thermal settling is ~10-30 s
+* (the Al block + element mass through Rcond give a dominant time constant ~8.5 s), which
+* is the real, physical response speed of this sensor.  [The .asc schematic mirrors this.]
+* ================================================================================
+
+* ----------------------------- tunable parameters --------------------------------
+.param dT=10           ; target rise (degC) -- baked into the bridge ratio below
+.param Vexc=5          ; bridge excitation (V), the constant low-power NTC supply
+.param B=3950          ; NTC Beta (K)
+.param R25=10000       ; NTC resistance at 25 C (ohm)
+.param fpwm=1k         ; PWM carrier frequency (Hz)
+.param Rin=1Meg        ; difference-amp input R (high, so it doesn't load the ~3.5k bridge
+.param Rfb=10Meg       ; midpoints and shift the balance -> Gd = Rfb/Rin = 10)
+.param Rii=100k        ; PI input R
+.param Cint=47u        ; PI integrator cap; integral time Rii*Cint ~5s ~ plant's dominant
+.param Rfp=200k        ; thermal time constant (Al block + element through Rcond)
+*                        Rfp/Rii=2 sets the proportional gain (damping). Slow integral +
+* The bridge ratio Ra/Rb is chosen so the bridge balances when Rdn/Rup = the ratio a
+* 10K/3950 pair shows for a 10 C rise (Rdn(30C)/Rup(20C) = 0.641): Ra = 0.641 * Rb.
+
+* ----------------------------- supplies -------------------------------------------
+Vcc  vcc 0  12         ; op-amp +rail
+Vee  vee 0 -12         ; op-amp -rail
+Vpwr vpwr 0 12         ; heater power rail
+Vx   vexc 0 {Vexc}     ; bridge / NTC excitation
+
+* ===================== (A) NTC thermistors + Wheatstone bridge ====================
+* Heated (downstream) arm: Vexc - NTCdn - nodeL - Ra - GND.  Element cold => NTCdn
+* high => nodeL low.  NTC resistance follows the Beta model on the thermal node Tdn.
+Rdn  vexc nodeL R={R25}*exp({B}*(1/(V(Tdn)+273.15)-1/298.15))
+Ra   nodeL 0 6.41k
+* Reference (upstream) arm: Vexc - NTCup - nodeR - Rb - GND.  NTCup sees fluid temp.
+Rup  vexc nodeR R={R25}*exp({B}*(1/(V(Tfl)+273.15)-1/298.15))
+Rb   nodeR 0 10k
+
+* ===================== (B) difference amplifier  err = Gd*(nodeL-nodeR) ============
+* 4-resistor diff amp; err goes negative when the element is cold (nodeL < nodeR).
+Rin_n nodeR uA_n {Rin}
+Rf_n  uA_n  err  {Rfb}
+Rin_p nodeL uA_p {Rin}
+Rf_p  uA_p  0    {Rfb}
+XU1   uA_p uA_n err vcc vee OPAMP
+
+* ===================== (C) PI controller (inverting) -> vctrl ======================
+* err<0 (cold) -> vctrl rises -> more duty -> more heat. Diodes clamp vctrl to ~0..1
+* (the carrier range), which also provides anti-windup by capping the integrator.
+* TRUE PI: Rfp is in SERIES with Cf in the feedback (Zf = Rfp + 1/sCf), giving a
+* proportional term Rfp/Rii AND infinite DC gain (integral) -> zero steady-state error.
+* (A resistor in PARALLEL with Cf would only be a lossy integrator -> residual error.)
+Rip  err  pi_n  {Rii}
+Rfpp pi_n pmid  {Rfp}
+Cf   pmid vctrl {Cint}
+XU2  0 pi_n vctrl vcc vee OPAMP
+* anti-windup: back-to-back zeners ACROSS the feedback clamp (vctrl - pi_n) to ~+-1.1 V.
+* Being in the feedback path, this stops the integrator cap charging once it saturates
+* (true anti-windup) -- a clamp on the output alone lets the cap keep winding -> overshoot.
+Dza  vctrl zc  DZ
+Dzb  pi_n  zc  DZ
+.model DZ D(Is=1e-12 BV=0.9 Ibv=10m)   ; standard model so BV breakdown works; clamp ~+-1.5V
+*   (BV kept well above the operating vctrl ~0.3 so reverse leakage can't create ss error)
+
+* ===================== (D) PWM: carrier + comparator ==============================
+Bsaw saw 0 V=(time*{fpwm})-floor(time*{fpwm})   ; 0..1 ramp (stands in for a 555)
+XU3  vctrl saw pwm vcc vee OPAMP                 ; pwm HIGH when vctrl > saw
+
+* ===================== (E) gate drive + power MOSFET + heater =====================
+Rg     pwm gate 100
+M1     nd gate nsrc PWRFET
+.model PWRFET VDMOS(Vto=2.5 Kp=20 Rd=0.02 Cgs=1n Cgdmax=0.5n Cgdmin=0.05n)
+Rheat  vpwr nd 3.6        ; 40 W class heater (~37 W with Rds+shunt drop)
+Rsense nsrc 0 0.1         ; low-side current-sense shunt
+
+* ===================== (F) current-sense amplifier -> ESP32 ADC ===================
+* Average the switched shunt voltage, then x10 -> vadc = I_avg * (0.1*10) = I_avg*1.
+Rflt nsrc navg 10k
+Cflt navg 0 4.7u
+Rsa1 sa_n 0 1k
+Rsa2 sa_n vadc 9k
+XU4  navg sa_n vadc vcc vee OPAMP   ; non-inverting gain = 1 + 9k/1k = 10
+
+* ===================== (G) thermal plant (heater body -> element -> fluid) ========
+Vfl  Tfl 0 20                              ; fluid / upstream reference temp (degC)
+Vg   Gf  0 PWL(0 1.0  17.999 1.0  18 1.746) ; convective conductance W/K; flow step @18s
+Chs  Th  0 2.0 ic=20                        ; heater + Al-block heat capacity (J/K)
+Cel  Tdn 0 1.6 ic=20                        ; element/NTC heat capacity (J/K)
+Rcond Th Tdn 3                              ; heater->NTC conduction (K/W); sets V(Th)
+Bqh  0 Th  I=I(Rheat)*I(Rheat)*3.6          ; heater electrical power -> heat into Th
+Bloss Tdn Tfl I=(V(Tdn)-V(Tfl))*V(Gf)       ; convective loss to fluid = G*(Tdn-Tfl)
+
+* ----------------------------- analysis ------------------------------------------
+.ic V(Tdn)=20 V(Th)=20 V(vctrl)=0
+.tran 0 30 0 30u uic
+
+* ================================ op-amp macromodel ==============================
+* Single-pole op-amp: gm stage -> R1||C1 pole -> output HARD-LIMITED to the rails.
+* DC gain = Aol, gain-bandwidth = GBW. The output limit is a behavioural clamp (as in
+* LTspice's own UniversalOpamp2) so the output cannot run away when used open-loop as a
+* comparator -- the earlier diode clamp was too soft and let the gate hit hundreds of V.
+.subckt OPAMP inp inn out vcc vee
+Gm 0 n1 inp inn 100k                   ; gm=Aol=100k into R1=1 -> DC gain 100k
+R1 n1 0 1
+C1 n1 0 1.5915m                        ; = Aol/(2*pi*GBW) -> pole ~100Hz, GBW ~10MHz
+Bo nob 0 V=if(V(n1)>V(vcc)-1.2, V(vcc)-1.2, if(V(n1)<V(vee)+1.2, V(vee)+1.2, V(n1)))
+Rout nob out 100                      ; finite output Z so the external clamp diodes
+.ends                                 ; (anti-windup on vctrl) can actually pull the output
+
+* ================================ alternatives ===================================
+* (1) COMPONENT-LEVEL PWM CARRIER (op-amp relaxation oscillator) -- replace Bsaw with
+*     a Schmitt + integrator to generate a real triangle, e.g.:
+*       XU5 osc_t 0 sqr vcc vee OPAMP        ; comparator w/ hysteresis (Schmitt)
+*       Rh1 sqr osc_t 100k                   ;  ... set thresholds with Rh1/Rh2
+*       Rh2 osc_t 0 100k
+*       Rint sqr int_in 47k                  ; integrator turns square -> triangle
+*       Cint2 int_in saw 100n
+*       XU6 0 int_in saw vcc vee OPAMP
+*     then scale/offset 'saw' into 0..1 to match vctrl. (Left commented: the ideal
+*     carrier converges faster and the duty/averaging result is identical.)
+* (2) SKIP SWITCHING (continuous, fast check): delete the PWM/MOSFET stage and drive
+*     the heat directly:  Bqh 0 Th I=limit(V(vctrl),0,1)*40   and use .tran 0 4.
+* (3) CHANGE FLUID TEMP (compensation check): set Vfl to 5 or 30 -- V(Tdn) should
+*     still hold ~Vfl+dT (the bridge ratio tracks the upstream NTC, with the small
+*     +/-10% Beta-ratio drift documented in DESIGN_NOTES.md).
+* (4) POWER-vs-FLOW calibration: fix the flow, e.g. Vg Gf 0 1.746, and read steady
+*     V(vadc); sweep the value (or .step) to map the flow signal.
+.end

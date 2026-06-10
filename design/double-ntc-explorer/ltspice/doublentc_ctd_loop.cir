@@ -1,0 +1,75 @@
+* DoubleNTC constant-delta-T flow sensor -- analog control-loop verification (LTspice)
+* =====================================================================================
+* Behavioural ELECTROTHERMAL model of the analog PI + PWM loop that holds the heated
+* element at dT above the upstream (fluid) reference. It lets you verify the loop the
+* explorer abstracts: cold-start turn-on, steady regulation, and the flow-step response.
+*
+* Thermal <-> electrical analogy used for the PLANT (left of the controller):
+*     node voltage [V] = temperature [degC]      B-source current = heat flow [W]
+*     R [ohm]          = thermal R [K/W]          C [F]            = thermal mass [J/K]
+*     time [s]         = time [s]
+* The control nodes (Err, Vint, ctrl, saw, gate) are ordinary control voltages.
+*
+* HOW TO RUN:  open this file in LTspice (File > Open), then Run (the 'running man').
+*
+* WHAT TO LOOK AT (add traces in the plot pane):
+*   V(Tdn)  -> heated-element temperature: climbs from the fluid temp and HOLDS at
+*              fluid+dT (= 30).  The upstream reference is V(Tfl) = 20.
+*   V(Pavg) -> delivered heater power [W]: settles at ~G*dT, and JUMPS when flow steps.
+*   V(ctrl) -> PWM duty demand (0..1).     V(gate) -> the PWM waveform (zoom in).
+* A flow step is applied at t = 3 s (Gf: 1.0 -> 1.746 W/K, i.e. flow increases) so you
+* can watch the loop raise the power to keep V(Tdn) pinned at 30.
+* =====================================================================================
+
+.param dT=10        ; target temperature rise (degC)
+.param Cmass=3.6    ; element + Al-block thermal mass (J/K)
+.param Pmax=40      ; heater power at 100% duty (W)   (40 W @ 12 V => 3.6 ohm)
+.param fpwm=1k      ; PWM switching frequency (Hz)
+.param Kp=0.2       ; PI proportional gain (duty per degC of error)
+.param Ki=0.4       ; PI integral gain
+.param Kaw=8        ; anti-windup (back-calculation) gain
+
+* ---------- upstream NTC reference = fluid temperature ----------
+Vfl   Tfl 0 20
+
+* ---------- flow as a convective conductance G(t) [W/K]; step up at t = 3 s ----------
+Vg    Gf  0 PWL(0 1.0  2.999 1.0  3 1.746)
+
+* ---------- thermal plant: heated-element node Tdn ----------
+Cel   Tdn 0 {Cmass} ic=20
+Bloss Tdn Tfl I=(V(Tdn)-V(Tfl))*V(Gf)      ; heat lost to fluid  = G*(Tdn - Tfl)
+Bheat 0   Tdn I=V(P)                        ; heater injects P watts into the element
+
+* ---------- set-point = upstream + dT ----------
+Btgt  Tgt 0 V=V(Tfl)+{dT}
+
+* ---------- (1) difference amp:  error = set-point - element ----------
+Berr  Err 0 V=V(Tgt)-V(Tdn)
+
+* ---------- (2) PI controller with anti-windup -> duty demand ctrl (0..1) ----------
+Bpi   pi   0 V=Kp*V(Err)+V(Vint)                  ; unclamped PI output
+Bctrl ctrl 0 V=if(V(pi)>1,1,if(V(pi)<0,0,V(pi)))  ; clamp to [0,1]
+Bint  0 Vint I=Ki*V(Err)-Kaw*(V(pi)-V(ctrl))      ; integrator drive (+ anti-windup)
+Cint  Vint 0 1 ic=0
+Rleak Vint 0 1G                                   ; DC path for the integrator node
+
+* ---------- (3) PWM driver: sawtooth oscillator + comparator -> gate ----------
+Bsaw  saw  0 V=(time*{fpwm})-floor(time*{fpwm})   ; 0->1 ramp at fpwm
+Bgate gate 0 V=if(V(ctrl)>V(saw),1,0)             ; comparator: duty = ctrl
+
+* ---------- power stage: gate switches Pmax into the heater (avg'd by the mass) ----------
+Bp    P 0 V=V(gate)*{Pmax}                        ; instantaneous heater power (0 or Pmax)
+Rpf   P Pavg 1
+Cpf   Pavg 0 0.05                                 ; 50 ms low-pass -> average power (W)
+
+.ic V(Tdn)=20 V(Vint)=0
+.tran 0 6 0 20u uic
+
+* ---- Alternatives (edit as needed) ----------------------------------------------------
+* Fast continuous check (skip PWM switching): replace the Bp line with
+*     Bp P 0 V=V(ctrl)*{Pmax}
+* and you can use a coarser .tran (e.g. .tran 0 6).
+* Power-vs-flow calibration: hold the flow constant, e.g.  Vg Gf 0 1.746
+*     then change the value and re-Run (or use .step) to map power vs flow.
+* Temperature compensation: change Vfl (fluid temp); V(Tdn) should still hold Vfl+dT.
+.end

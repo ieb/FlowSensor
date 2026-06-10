@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DoubleNTC Flow Sensor Explorer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Two-NTC Constant-ΔT Flow Sensor — Model Explorer</h1>
+      <p class="sub">
+        Explore the <strong>DoubleNTC</strong> topology with a <strong>fully-digital
+        (ESP32-software) control loop</strong>: an upstream NTC reads the stream temperature
+        while a downstream NTC, warmed by a separate 40 W heater, is held a constant ΔT above it
+        by a software PI driving a LEDC PWM. The <em>power</em> needed to hold ΔT is the flow
+        signal (King's law, <code>P ≈ a + b·√v</code>), computed in firmware as
+        <code>duty × V_bus² / R</code> — it never saturates and is intrinsically temperature
+        compensated. See <code>design/DoubleNTC.md</code> and the single-probe companion
+        <code>../model-explorer/</code>.
+      </p>
+    </header>
+
+    <main>
+      <!-- ============ TOP: diagram + controls ============ -->
+      <section class="panel diagram-panel">
+        <h2>Sensor &amp; control loop</h2>
+        <canvas id="diagram"></canvas>
+      </section>
+
+      <section class="panel controls-panel">
+        <h2>Controls</h2>
+
+        <div class="field">
+          <label>Scenario</label>
+          <div class="scenarios" id="scenarios">
+            <button data-scene="air" class="active">Air</button>
+            <button data-scene="stillwater">Still water</button>
+            <button data-scene="flowing">Flowing water</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Heated element</label>
+          <div class="scenarios" id="elements"></div>
+        </div>
+
+        <div class="readout" id="readout"></div>
+
+        <details open>
+          <summary>Set-point &amp; flow</summary>
+          <div class="ctrl" data-key="delta_T" data-min="2" data-max="40" data-step="1" data-unit="°C" data-label="Held ΔT (rise)"></div>
+          <div class="ctrl" data-key="T_fluid" data-min="0" data-max="40" data-step="1" data-unit="°C" data-label="Fluid temperature"></div>
+          <div class="ctrl" data-key="flow_lpm" data-min="0" data-max="60" data-step="0.5" data-unit="l/min" data-label="Flow rate"></div>
+          <div class="ctrl" data-key="pipe_dia_mm" data-min="6" data-max="40" data-step="0.5" data-unit="mm" data-label="Pipe bore diameter"></div>
+        </details>
+
+        <details open>
+          <summary>Probe element (head + Al block)</summary>
+          <p class="hint" style="margin: 6px 0">
+            Active when Heated element = Probe. Both NTCs use this housing: only the head is
+            wetted, connected by a short neck to an aluminium block holding the heater + NTC.
+            The neck length/conductivity is the heater→head bottleneck.
+          </p>
+          <div class="ctrl" data-key="probe_head_dia_mm" data-min="5" data-max="16" data-step="0.1" data-unit="mm" data-label="Head diameter"></div>
+          <div class="ctrl" data-key="probe_head_thick_mm" data-min="1" data-max="8" data-step="0.1" data-unit="mm" data-label="Head thickness"></div>
+          <div class="ctrl" data-key="head_side_exposed_mm" data-min="0" data-max="8" data-step="0.1" data-unit="mm" data-label="Side wall wetted (0=front only)"></div>
+          <div class="ctrl" data-key="probe_gap_mm" data-min="0" data-max="30" data-step="0.5" data-unit="mm" data-label="Gap: block→head (0=contact)"></div>
+          <div class="ctrl" data-key="probe_ntc_from_face_mm" data-min="0.5" data-max="6" data-step="0.1" data-unit="mm" data-label="NTC depth from face"></div>
+          <div class="ctrl" data-key="probe_k" data-min="5" data-max="400" data-step="1" data-unit="W/mK" data-label="Neck conductivity"></div>
+          <div class="ctrl" data-key="al_dia_mm" data-min="8" data-max="30" data-step="0.5" data-unit="mm" data-label="Al block diameter"></div>
+          <div class="ctrl" data-key="al_thick_mm" data-min="3" data-max="20" data-step="0.5" data-unit="mm" data-label="Al block thickness"></div>
+          <div class="ctrl" data-key="al_hole_mm" data-min="3" data-max="10" data-step="0.5" data-unit="mm" data-label="Hole diameter (×2)"></div>
+        </details>
+
+        <details>
+          <summary>Tube element (316)</summary>
+          <p class="hint" style="margin: 6px 0">Active when Heated element = 316 tube.</p>
+          <div class="ctrl" data-key="tube_od_mm" data-min="2" data-max="10" data-step="0.5" data-unit="mm" data-label="Tube OD"></div>
+          <div class="ctrl" data-key="tube_id_mm" data-min="0" data-max="6" data-step="0.5" data-unit="mm" data-label="Tube bore ID"></div>
+          <div class="ctrl" data-key="active_len_mm" data-min="2" data-max="30" data-step="0.5" data-unit="mm" data-label="Active wetted length"></div>
+          <div class="ctrl" data-key="support_len_mm" data-min="3" data-max="40" data-step="0.5" data-unit="mm" data-label="Support conduction length"></div>
+          <div class="ctrl" data-key="tube_k" data-min="5" data-max="120" data-step="1" data-unit="W/mK" data-label="Tube conductivity"></div>
+        </details>
+
+        <details>
+          <summary>Bead element (glass)</summary>
+          <p class="hint" style="margin: 6px 0">Active when Heated element = Glass bead.</p>
+          <div class="ctrl" data-key="bead_dia_mm" data-min="1" data-max="6" data-step="0.1" data-unit="mm" data-label="Bead diameter"></div>
+          <div class="ctrl" data-key="bead_exposed_frac" data-min="0.1" data-max="1" data-step="0.05" data-unit="" data-label="Exposed fraction"></div>
+        </details>
+
+        <details>
+          <summary>Heater drive (V_drive)</summary>
+          <p class="hint" style="margin: 6px 0">
+            A separate ceramic heater (not the NTC), PWM'd by the ESP32. P_max = V²/R — 3.6 Ω @
+            12 V ≈ 40 W. Flow = duty × V_bus² / R. The marine bus swings (min/max below); power
+            ∝ V², so firmware reads V_bus to compensate.
+          </p>
+          <div class="ctrl" data-key="heater_R" data-min="1" data-max="20" data-step="0.1" data-unit="Ω" data-label="Heater resistance"></div>
+          <div class="ctrl" data-key="v_drive" data-min="5" data-max="24" data-step="0.1" data-unit="V" data-label="V_drive nominal"></div>
+          <div class="ctrl" data-key="v_drive_min" data-min="5" data-max="15" data-step="0.1" data-unit="V" data-label="V_drive min (bus low)"></div>
+          <div class="ctrl" data-key="v_drive_max" data-min="12" data-max="18" data-step="0.1" data-unit="V" data-label="V_drive max (bus high)"></div>
+          <div class="ctrl" data-key="heater_tmax_c" data-min="80" data-max="600" data-step="10" data-unit="°C" data-label="Heater max temp"></div>
+          <div class="ctrl" data-key="G_lead" data-min="0" data-max="0.02" data-step="0.0005" data-unit="W/K" data-label="Lead-wire heat leak"></div>
+        </details>
+
+        <details>
+          <summary>Control (software PI)</summary>
+          <p class="hint" style="margin: 6px 0">
+            Gains for the ESP32 software PI (output is duty, clamped 0..1 with anti-windup).
+            Tuned for the slow plant (dominant thermal pole ~8.5 s).
+          </p>
+          <div class="ctrl" data-key="pi_kp" data-min="0" data-max="1" data-step="0.005" data-unit="/°C" data-label="PI Kp (duty per °C)"></div>
+          <div class="ctrl" data-key="pi_ki" data-min="0" data-max="0.2" data-step="0.001" data-unit="/°C·s" data-label="PI Ki (duty per °C·s)"></div>
+        </details>
+
+        <details>
+          <summary>Sensing NTCs (3.3 V dividers → ADC)</summary>
+          <p class="hint" style="margin: 6px 0">
+            The two NTCs are low-power temperature sensors on 3.3 V dividers, each read by an
+            ESP32 ADC channel. Self-heating should be negligible.
+          </p>
+          <div class="ctrl" data-key="ntc_vexc" data-min="1" data-max="3.3" data-step="0.1" data-unit="V" data-label="Divider excitation"></div>
+          <div class="ctrl" data-key="ntc_rseries" data-min="1000" data-max="100000" data-step="500" data-unit="Ω" data-label="Divider series R"></div>
+          <div class="ctrl" data-key="ntc_diss_mw_c" data-min="1" data-max="20" data-step="0.5" data-unit="mW/°C" data-label="NTC dissipation const"></div>
+        </details>
+
+        <details>
+          <summary>Convection coefficients</summary>
+          <div class="ctrl" data-key="h_air" data-min="2" data-max="40" data-step="1" data-unit="W/m²K" data-label="h — air (natural)"></div>
+          <div class="ctrl" data-key="h_stillwater" data-min="50" data-max="2000" data-step="10" data-unit="W/m²K" data-label="h — still water"></div>
+          <div class="ctrl" data-key="emissivity" data-min="0" data-max="1" data-step="0.05" data-unit="" data-label="Emissivity (air radiation)"></div>
+        </details>
+
+        <details>
+          <summary>Flow-step response</summary>
+          <div class="ctrl" data-key="step_from_lpm" data-min="0" data-max="60" data-step="1" data-unit="l/min" data-label="Step from"></div>
+          <div class="ctrl" data-key="step_to_lpm" data-min="0" data-max="60" data-step="1" data-unit="l/min" data-label="Step to"></div>
+          <div class="ctrl" data-key="step_time" data-min="0.5" data-max="30" data-step="0.5" data-unit="s" data-label="Graph horizon"></div>
+        </details>
+
+        <details>
+          <summary>NTC &amp; ADC (accuracy)</summary>
+          <div class="field" style="margin: 8px 0">
+            <label>ADC</label>
+            <div class="scenarios" id="adcpresets"></div>
+          </div>
+          <div class="ctrl" data-key="ntc_r25" data-min="1" data-max="100" data-step="1" data-unit="kΩ" data-label="Sensing NTC R₂₅"></div>
+          <div class="ctrl" data-key="ntc_beta" data-min="3000" data-max="4500" data-step="10" data-unit="K" data-label="NTC Beta"></div>
+          <div class="ctrl" data-key="adc_fsr" data-min="0.256" data-max="6.144" data-step="0.001" data-unit="V" data-label="ADC full-scale"></div>
+          <div class="ctrl" data-key="adc_noise_mv" data-min="0" data-max="60" data-step="0.05" data-unit="mV" data-label="ADC noise (raw RMS)"></div>
+          <div class="ctrl" data-key="adc_averages" data-min="1" data-max="256" data-step="1" data-unit="×" data-label="ADC averages"></div>
+          <div class="ctrl" data-key="adc_inl_mv" data-min="0" data-max="40" data-step="0.05" data-unit="mV" data-label="INL/offset floor"></div>
+        </details>
+
+        <details>
+          <summary>Single-probe comparison</summary>
+          <p class="hint" style="margin: 6px 0">
+            The M6 heated probe from <code>../model-explorer</code>, drawn on the comparison
+            chart so the resolution gain is quantitative.
+          </p>
+          <div class="ctrl" data-key="sp_R_cond" data-min="5" data-max="120" data-step="1" data-unit="K/W" data-label="Probe shaft R_cond"></div>
+          <div class="ctrl" data-key="sp_T_ptc" data-min="40" data-max="120" data-step="1" data-unit="°C" data-label="Probe PTC temp"></div>
+          <div class="ctrl" data-key="sp_div_rseries" data-min="1" data-max="50" data-step="0.5" data-unit="kΩ" data-label="Probe series resistor"></div>
+        </details>
+
+        <details>
+          <summary>Numerics</summary>
+          <div class="ctrl" data-key="sim_time" data-min="2" data-max="120" data-step="1" data-unit="s" data-label="Turn-on sim time"></div>
+        </details>
+
+        <button id="reset" class="reset">Reset to defaults</button>
+      </section>
+
+      <!-- ============ HOW IT WORKS: op-amp control schematic ============ -->
+      <section class="panel circuit-panel">
+        <h2>How the constant-ΔT loop works (fully digital, ESP32 software)</h2>
+        <canvas id="circuit"></canvas>
+        <ol class="circuit-explain">
+          <li>
+            <b>Two jobs, separated.</b> The NTCs only <i>sense</i> (low-current 3.3 V dividers,
+            negligible self-heating); a separate <b>40 W ceramic heater</b> on the 12 V bus does
+            the heating. There are <b>no op-amps, no bridge, no current-sense amplifier</b> — the
+            ESP32 runs the entire loop in software.
+          </li>
+          <li>
+            <b>Three ADC reads.</b> <code>ADC0</code> = upstream NTC divider, <code>ADC1</code> =
+            downstream NTC divider, <code>ADC2</code> = a divided-down tap of the 12 V bus. The
+            firmware converts the two divider voltages to <code>T_up</code> and <code>T_dn</code>
+            with the Beta equation <code>R = R25·exp(B(1/T − 1/T0))</code>.
+          </li>
+          <li>
+            <b>True constant ΔT in software.</b> The firmware computes
+            <code>T_target = T_up + ΔT</code> and the error <code>T_target − T_dn</code>. Because
+            ΔT is an explicit number (not a fixed resistor ratio), there is <b>no Beta-ratio
+            drift</b> — the held ΔT is exact at every fluid temperature.
+          </li>
+          <li>
+            <b>Software PI → LEDC PWM.</b> A software PI (output clamped 0..1, back-calculation
+            anti-windup) turns the error into a duty and <code>ledcWrite()</code>s it to the gate
+            driver → low-side MOSFET → heater. Flow rises → tip cools → <code>T_dn</code> drops →
+            error → PI ramps the duty up → ΔT restored. Self-correcting at every flow.
+          </li>
+          <li>
+            <b>The flow signal is duty × V_bus² / R.</b> The duty is <i>known</i> (the firmware
+            commanded it), so no current sense is needed. Power ∝ V², and the marine bus swings
+            ~11–15 V, so the firmware uses the <b>measured</b> <code>V_bus</code> from ADC2 —
+            without that, a ±ΔV swing would give a ±2·ΔV/V power error.
+          </li>
+          <li>
+            <b>Hardware fail-safe.</b> Software now owns 40 W, so a <b>hardware watchdog</b> forces
+            the gate OFF if the firmware hangs, and a <b>thermal cutout</b> on the aluminium block
+            is the final backstop. (The trade vs the analog loop: simpler + programmable + true
+            constant ΔT + power-for-free, at the cost of ADC-noise-limited ΔT and dependence on
+            MCU uptime.)
+          </li>
+        </ol>
+      </section>
+
+      <!-- ============ MIDDLE: graphs ============ -->
+      <section class="panel graph-panel full">
+        <h2>Flow calibration — power to hold ΔT vs flow rate</h2>
+        <p class="hint">
+          The core curve: electrical power the loop must deliver to hold ΔT as flow rises.
+          Air and still-water levels are reference bands; the marker is the current flow.
+          The dashed line is the King's-law fit <code>P = a + b·√v</code> — the power keeps
+          climbing with flow (no saturation), which is the whole point versus the single probe.
+        </p>
+        <canvas class="chart" id="chartPower"></canvas>
+        <p class="note" id="powerInfo"></p>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Heater duty cycle vs flow</h2>
+        <p class="hint">
+          What fraction of the 40 W heater the PWM driver must use to hold ΔT. When the curve
+          reaches 100 % the heater is saturated and can no longer hold ΔT at that flow — a
+          feasibility limit (raise the heater power, lower ΔT, or use a smaller element).
+        </p>
+        <canvas class="chart" id="chartDrive"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Detection levels — power by regime</h2>
+        <p class="hint">
+          Air sits near the parasitic-only power floor; still water is higher; flowing water
+          is higher still and rises with flow. Wide separation ⇒ robust air / still / flow
+          discrimination from the power signal alone.
+        </p>
+        <canvas class="chart" id="chartLevels"></canvas>
+      </section>
+
+      <section class="panel graph-panel full">
+        <h2>Why two sensors — ±1σ flow resolution vs the single probe</h2>
+        <p class="hint">
+          Both signals read through the same ADC. The single heated probe's head→fluid
+          temperature difference shrinks with flow, so its flow resolution blows up at high
+          flow. The CTD power signal only loses sensitivity as 1/√v, so its resolution stays
+          bounded. Lower is better.
+        </p>
+        <canvas class="chart" id="chartCompare"></canvas>
+        <p class="note" id="compareInfo"></p>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Flow-rate accuracy — ±1σ uncertainty vs flow (CTD)</h2>
+        <p class="hint">
+          ADC noise on the two NTC dividers sets a noise on the measured ΔT (σ_ΔT =
+          √(σ_Tup²+σ_Tdn²)), which propagates to flow through the calibration; a smaller
+          duty/Vbus-resolution term adds in quadrature. Degrades gracefully with flow. Improve
+          it with a bigger ΔT, more averaging (the plant is slow), or a lower-noise ADC.
+        </p>
+        <canvas class="chart" id="chartAccuracy"></canvas>
+        <p class="note" id="accInfo"></p>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>ΔT trade-off — power &amp; resolution vs chosen ΔT</h2>
+        <p class="hint">
+          A bigger ΔT means a stronger signal (better resolution) but more power and, in
+          water, a smaller margin to boiling. The two curves show the tension. (Right axis is
+          relative.)
+        </p>
+        <canvas class="chart" id="chartDeltaT"></canvas>
+      </section>
+
+      <section class="panel graph-panel full">
+        <h2>Temperature compensation — calibration vs fluid temperature</h2>
+        <p class="hint">
+          Power-vs-flow curves at several fluid temperatures (5–30 °C). Because ΔT is
+          referenced to the upstream NTC and the physics is dominated by <code>h·A·ΔT</code>,
+          the curves nearly coincide — the sensor is intrinsically temperature compensated
+          (no heater-off ambient measurement needed, unlike the single probe). Residual spread
+          is from fluid-property drift, not modelled here.
+        </p>
+        <canvas class="chart" id="chartTempComp"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Turn-on transient — element temperature vs time</h2>
+        <p class="hint">
+          Cold start: the loop drives the element (up to the rail power) to the ΔT set-point.
+          The small element mass settles fast; flowing water needs the most power and the
+          bead settles faster than the tube.
+        </p>
+        <canvas class="chart" id="chartTurnon"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Flow-step response — power signal vs time</h2>
+        <p class="hint">
+          Simulated with the actual software PI on the two-node thermal plant (heater block +
+          element coupled through R_cond). On a flow change the loop re-settles ΔT and the
+          measured power moves to the new value, dominated by the slow ~8.5 s thermal pole —
+          this sensor responds over seconds.
+        </p>
+        <canvas class="chart" id="chartStep"></canvas>
+        <p class="note" id="stepInfo"></p>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>V_drive compensation — power error vs bus swing</h2>
+        <p class="hint">
+          The flow signal is <code>duty × V_bus² / R</code>, so it is quadratic in the bus
+          voltage. Without measuring V_bus, the marine bus swing (11–15 V) injects a ±2·ΔV/V
+          power error; reading V_bus on ADC2 cuts it to the V_bus-ADC accuracy. Lower is better.
+        </p>
+        <canvas class="chart" id="chartVbus"></canvas>
+        <p class="note" id="vbusInfo"></p>
+      </section>
+
+      <!-- ============ BOTTOM: detection model / ESP32 ============ -->
+      <section class="panel detect-panel">
+        <h2>Detection model &amp; ESP32 output</h2>
+        <div class="detect-grid">
+          <div>
+            <h3>Discrimination thresholds (by power)</h3>
+            <table id="thresholds"></table>
+            <p class="note" id="adcNote"></p>
+          </div>
+          <div>
+            <h3>ESP32 reference (C)</h3>
+            <pre id="esp32"></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Self-contained — runs offline from <code>file://</code>. All parameters editable; model
+        documented in <code>model.js</code>. See <code>README.md</code> for assumptions.
+      </p>
+    </footer>
+
+    <script src="model.js"></script>
+    <script src="charts.js"></script>
+    <script src="diagram.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

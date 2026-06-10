@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flow Sensor Model Explorer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Heated-Probe Flow Sensor — Model Explorer</h1>
+      <p class="sub">
+        Explore the thermal behaviour of the M6-bolt heated probe and derive a deterministic
+        air / still-water / flow detection model for the ESP32. See
+        <code>design/AlayisisPrompt.md</code> and the project <code>README.md</code>.
+      </p>
+    </header>
+
+    <main>
+      <!-- ============ TOP: diagram + controls ============ -->
+      <section class="panel diagram-panel">
+        <h2>Sensor model</h2>
+        <canvas id="diagram"></canvas>
+      </section>
+
+      <section class="panel controls-panel">
+        <h2>Controls</h2>
+
+        <div class="field">
+          <label>Scenario</label>
+          <div class="scenarios" id="scenarios">
+            <button data-scene="air" class="active">Air</button>
+            <button data-scene="stillwater">Still water</button>
+            <button data-scene="flowing">Flowing water</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Probe material (main shaft &amp; head)</label>
+          <div class="scenarios" id="materials"></div>
+        </div>
+
+        <div class="field">
+          <label>Construction</label>
+          <div class="scenarios" id="construction">
+            <button data-constr="bare" class="active">Bare 316 shaft</button>
+            <button data-constr="sleeve">Aluminium sleeve</button>
+          </div>
+        </div>
+
+        <div class="readout" id="readout"></div>
+
+        <details open>
+          <summary>Temperatures &amp; flow</summary>
+          <div class="ctrl" data-key="T_ptc" data-min="40" data-max="120" data-step="1" data-unit="°C" data-label="PTC temperature"></div>
+          <div class="ctrl" data-key="T_fluid" data-min="0" data-max="40" data-step="1" data-unit="°C" data-label="Fluid temperature"></div>
+          <div class="ctrl" data-key="flow_lpm" data-min="0" data-max="60" data-step="0.5" data-unit="l/min" data-label="Flow rate"></div>
+        </details>
+
+        <details>
+          <summary>Convection coefficients</summary>
+          <div class="ctrl" data-key="h_air" data-min="2" data-max="40" data-step="1" data-unit="W/m²K" data-label="h — air (natural)"></div>
+          <div class="ctrl" data-key="h_stillwater" data-min="50" data-max="2000" data-step="10" data-unit="W/m²K" data-label="h — still water"></div>
+          <div class="ctrl" data-key="emissivity" data-min="0" data-max="1" data-step="0.05" data-unit="" data-label="Emissivity (air radiation)"></div>
+        </details>
+
+        <details>
+          <summary>Geometry</summary>
+          <div class="ctrl" data-key="pipe_dia_mm" data-min="6" data-max="40" data-step="0.5" data-unit="mm" data-label="Pipe bore diameter"></div>
+          <div class="ctrl" data-key="shaft_len_mm" data-min="5" data-max="40" data-step="0.5" data-unit="mm" data-label="Shaft length"></div>
+          <div class="ctrl" data-key="shaft_od_mm" data-min="3" data-max="10" data-step="0.1" data-unit="mm" data-label="Shaft OD"></div>
+          <div class="ctrl" data-key="shaft_id_mm" data-min="0" data-max="5" data-step="0.1" data-unit="mm" data-label="Shaft bore ID"></div>
+          <div class="ctrl" data-key="head_dia_mm" data-min="5" data-max="16" data-step="0.1" data-unit="mm" data-label="Head diameter"></div>
+          <div class="ctrl" data-key="head_thick_mm" data-min="1" data-max="8" data-step="0.1" data-unit="mm" data-label="Head thickness"></div>
+          <div class="ctrl" data-key="ntc_from_face_mm" data-min="0.5" data-max="6" data-step="0.1" data-unit="mm" data-label="NTC depth from face"></div>
+          <div class="ctrl" data-key="k_ss" data-min="5" data-max="120" data-step="1" data-unit="W/mK" data-label="Conductivity (k)"></div>
+        </details>
+
+        <details>
+          <summary>Aluminium sleeve</summary>
+          <p class="hint" style="margin: 6px 0">
+            Active only when Construction = Aluminium sleeve. The sleeve runs in parallel with
+            the 316 shaft and stops short of the head for the seal seat.
+          </p>
+          <div class="ctrl" data-key="sleeve_od_mm" data-min="6.5" data-max="16" data-step="0.5" data-unit="mm" data-label="Sleeve OD"></div>
+          <div class="ctrl" data-key="sleeve_gap_mm" data-min="0" data-max="10" data-step="0.5" data-unit="mm" data-label="Seal gap (short of head)"></div>
+          <div class="ctrl" data-key="sleeve_k" data-min="100" data-max="250" data-step="5" data-unit="W/mK" data-label="Sleeve conductivity"></div>
+        </details>
+
+        <details>
+          <summary>Flow-step response</summary>
+          <div class="ctrl" data-key="step_from_lpm" data-min="0" data-max="60" data-step="1" data-unit="l/min" data-label="Step from"></div>
+          <div class="ctrl" data-key="step_to_lpm" data-min="0" data-max="60" data-step="1" data-unit="l/min" data-label="Step to"></div>
+          <div class="ctrl" data-key="step_ramp_time" data-min="0" data-max="60" data-step="0.5" data-unit="s" data-label="Flow ramp time (0 = step)"></div>
+          <div class="ctrl" data-key="step_time" data-min="2" data-max="120" data-step="1" data-unit="s" data-label="Graph horizon"></div>
+        </details>
+
+        <details>
+          <summary>NTC &amp; ADC (accuracy)</summary>
+          <div class="field" style="margin: 8px 0">
+            <label>ADC</label>
+            <div class="scenarios" id="adcpresets"></div>
+          </div>
+          <div class="ctrl" data-key="ntc_r25" data-min="1" data-max="100" data-step="1" data-unit="kΩ" data-label="NTC R₂₅"></div>
+          <div class="ctrl" data-key="ntc_beta" data-min="3000" data-max="4500" data-step="10" data-unit="K" data-label="NTC Beta"></div>
+          <div class="ctrl" data-key="div_rseries" data-min="1" data-max="50" data-step="0.5" data-unit="kΩ" data-label="Series resistor"></div>
+          <div class="ctrl" data-key="div_vsupply" data-min="2.5" data-max="3.6" data-step="0.1" data-unit="V" data-label="Divider supply"></div>
+          <div class="ctrl" data-key="adc_fsr" data-min="0.256" data-max="6.144" data-step="0.001" data-unit="V" data-label="ADC full-scale"></div>
+          <div class="ctrl" data-key="adc_noise_mv" data-min="0" data-max="60" data-step="0.05" data-unit="mV" data-label="ADC noise (raw RMS)"></div>
+          <div class="ctrl" data-key="adc_averages" data-min="1" data-max="256" data-step="1" data-unit="×" data-label="ADC averages"></div>
+          <div class="ctrl" data-key="adc_inl_mv" data-min="0" data-max="40" data-step="0.05" data-unit="mV" data-label="INL/offset floor"></div>
+        </details>
+
+        <details>
+          <summary>Transient turn-on</summary>
+          <div class="ctrl" data-key="heater_power" data-min="1" data-max="6" data-step="0.5" data-unit="W" data-label="Heater power"></div>
+          <div class="ctrl" data-key="sim_time" data-min="20" data-max="1800" data-step="10" data-unit="s" data-label="Simulation time"></div>
+          <div class="ctrl" data-key="n_nodes" data-min="20" data-max="120" data-step="5" data-unit="" data-label="Nodes (1-D solver)"></div>
+        </details>
+
+        <button id="reset" class="reset">Reset to defaults</button>
+      </section>
+
+      <!-- ============ MIDDLE: graphs ============ -->
+      <section class="panel graph-panel">
+        <h2>Steady-state temperature profile (PTC → face)</h2>
+        <p class="hint">
+          Lumped analytic model (dashed) vs 1-D finite-difference (solid). The NTC sits at the
+          marked depth; the gap between the curves shows the lumped approximation error.
+        </p>
+        <canvas class="chart" id="chartProfile"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Flow calibration — NTC temperature vs flow rate</h2>
+        <p class="hint">
+          The core flow-rate curve (l/min through the pipe bore). Air and still-water levels are
+          drawn as reference bands; the marker is the current flow rate. This monotonic curve is
+          what the firmware inverts to read flow.
+        </p>
+        <canvas class="chart" id="chartFlow"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Turn-on transient — NTC vs time (cold start, self-regulating PTC)</h2>
+        <p class="hint">
+          Each medium has a distinct time constant — a second, independent discriminator the
+          firmware can use alongside the steady reading.
+        </p>
+        <canvas class="chart" id="chartTransient"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Cool-down transient — NTC vs time (heater switched OFF)</h2>
+        <p class="hint">
+          Starting from the hot steady state, the heater is turned off and the probe decays
+          toward fluid temperature. With no heater power the rate is set purely by convection
+          and thermal mass: flowing water drops fastest, air stays hot longest (a persistent
+          dry signature). The decay is heater-block-mass dominated — raise Simulation time to
+          see the full curve.
+        </p>
+        <canvas class="chart" id="chartCooldown"></canvas>
+      </section>
+
+      <section class="panel graph-panel full">
+        <h2>Flow-step response — how fast the sensor reacts to a flow change</h2>
+        <p class="hint">
+          The probe is at steady state for the "from" flow, then the flow changes to the "to"
+          value over the configurable ramp time (0 = instantaneous step). The heater stays on
+          (self-regulating), so only the head and shaft re-equilibrate. Set the from/to rates and
+          ramp time in the Flow-step section. Dashed lines are the before/after steady readings;
+          the markers show the 63% response time and the moment the flow ramp ends.
+        </p>
+        <canvas class="chart" id="chartStep"></canvas>
+        <p class="note" id="stepInfo"></p>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Heat flux removed vs flow rate</h2>
+        <p class="hint">Power carried away from the head as flow increases.</p>
+        <canvas class="chart" id="chartFlux"></canvas>
+      </section>
+
+      <section class="panel graph-panel full">
+        <h2>Thresholds vs starting water temperature (5–30 °C)</h2>
+        <p class="hint">
+          How the regime readings and detection thresholds shift as the fluid temperature
+          varies. Straight lines ⇒ a simple linear temperature compensation works — the ESP32
+          can read ambient by briefly switching the heater off. The marker is the current
+          fluid temperature.
+        </p>
+        <canvas class="chart" id="chartTempSweep"></canvas>
+      </section>
+
+      <section class="panel graph-panel">
+        <h2>Sensor signal vs flow — NTC divider voltage</h2>
+        <p class="hint">
+          The voltage the ADC actually sees (NTC + series resistor), with the ±2σ ADC-noise
+          band. The curve flattens badly at high flow, so the noise band there spans a wide
+          range of flows — that overlap is the resolution limit. Set NTC/ADC values in the
+          NTC &amp; ADC section.
+        </p>
+        <canvas class="chart" id="chartSignal"></canvas>
+      </section>
+
+      <section class="panel graph-panel full">
+        <h2>Flow-rate accuracy — ±1σ uncertainty vs flow</h2>
+        <p class="hint">
+          ADC noise propagated through the calibration slope. A small temperature (hence
+          resistance, hence voltage) change per l/min gives a large flow uncertainty —
+          worst at high flow. Improve it with phosphor bronze / the Al sleeve (bigger
+          temperature swing), a series resistor matched to the flow-region resistance, or
+          more ADC averaging.
+        </p>
+        <canvas class="chart" id="chartResolution"></canvas>
+        <p class="note" id="accInfo"></p>
+      </section>
+
+      <!-- ============ BOTTOM: detection model / ESP32 ============ -->
+      <section class="panel detect-panel">
+        <h2>Detection model &amp; ESP32 output</h2>
+        <div class="detect-grid">
+          <div>
+            <h3>Discrimination thresholds</h3>
+            <table id="thresholds"></table>
+            <p class="note" id="adcNote"></p>
+          </div>
+          <div>
+            <h3>ESP32 reference (C)</h3>
+            <pre id="esp32"></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Self-contained — runs offline from <code>file://</code>. All parameters editable; model
+        documented in <code>model.js</code>. See <code>README.md</code> for assumptions.
+      </p>
+    </footer>
+
+    <script src="model.js"></script>
+    <script src="charts.js"></script>
+    <script src="diagram.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
