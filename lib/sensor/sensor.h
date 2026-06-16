@@ -13,7 +13,18 @@ class FlowSensor {
 		FlowSensor() {};
 		void begin();
 		void read();
-		uint8_t getState() { return state; }
+		uint8_t getState() { 
+			if (state == STATE_AIR ) {
+				return 0x01; 
+			} 
+			if (state == STATE_STILL ) {
+				return 0x02; 
+			} 
+			if (state == STATE_FLOW ) {
+				return 0x04; 
+			} 
+			return 0xFF;
+		}
 		float getFlowRate() { return flowLPM;}
 		float getUpstreamC() { return upstreamTemperatureC;}
 		float getDownstreamC() { return heatedTemperatureC; }

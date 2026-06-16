@@ -10,8 +10,8 @@
 #define FS_FLOW_CHAR_UUID      "0000ab01-0000-1000-8000-00805f9b34fb"
 #define FS_COMMAND_CHAR_UUID   "0000ab02-0000-1000-8000-00805f9b34fb"
 
-#define FS_REMOTE_SERVICE_UUID      "0000ab04-0000-1000-8000-00805f9b34fb"
-#define FS_REMOTE_FLOW_CHAR_UUID    "0000ab05-0000-1000-8000-00805f9b34fb"
+#define FM_SERVICE_UUID        "0000ac00-0000-1000-8000-00805f9b34fb"
+#define FM_FLOW_CHAR_UUID      "0000ac01-0000-1000-8000-00805f9b34fb"
 
 
 // Binary protocol constants
@@ -76,6 +76,8 @@ private:
 
     void handleCommand(uint16_t connHandle, const uint8_t* data, size_t len);
     void sendAuthResponse(uint16_t connHandle, bool accepted);
+    void notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
+
 
     NimBLEServer* _server = nullptr;
     NimBLECharacteristic* _flowSensorChar = nullptr;

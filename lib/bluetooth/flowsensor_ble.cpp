@@ -88,16 +88,46 @@ void FlowSensorBLE::unpair() {
     }
 }
 
+// Would be better if this was not static, but that would require binding this.
+void FlowSensorBLE::notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+    if (length == 2) {
+        if (pData[0] == FS_MAGIC_AUTH_RESP) {
+            if (pData[1] == 0x01) {
+                ESP_LOGI(TAG, "Pin code accepted");
+            } else {
+                ESP_LOGE(TAG, "Pin code rejected");
+            }
+        } else {
+            ESP_LOGI(TAG, "Unexpected Pin code response");
+        }
+    } else {
+        ESP_LOGI(TAG, "Unexpected Pin code messagee");
+    }
+    std::string str  = (isNotify == true) ? "Notification" : "Indication";
+    str             += " from ";
+    str             += pRemoteCharacteristic->getClient()->getPeerAddress().toString();
+    str             += ": Service = " + pRemoteCharacteristic->getRemoteService()->getUUID().toString();
+    str             += ", Characteristic = " + pRemoteCharacteristic->getUUID().toString();
+    str             += ", Value = " + std::string((char*)pData, length);
+    ESP_LOGI(TAG, "%s", str.c_str());
+}
+
 
 void FlowSensorBLE::pair(String &address, String &pin, bool save ) {
     unpair();
     _remoteClient = NimBLEDevice::createClient(NimBLEAddress(address.c_str(), 1));
     _remoteClient->connect();
-    NimBLERemoteService* pFlowService = _remoteClient->getService(FS_REMOTE_SERVICE_UUID);
-    _flowRemoteChar = pFlowService->getCharacteristic(FS_REMOTE_FLOW_CHAR_UUID);
+    NimBLERemoteService* pFlowService = _remoteClient->getService(FM_SERVICE_UUID);
+    _flowRemoteChar = pFlowService->getCharacteristic(FM_FLOW_CHAR_UUID);
+    // use a lambda to call this, so operatons can be performed if required on the connection.
+    auto cb = [this](NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+        this->notifyWrite(pRemoteCharacteristic, pData, length, isNotify);
+    };
+    _flowRemoteChar->subscribe(false, cb);
+
     if (_flowRemoteChar != nullptr) {
-        // TODO send the pin properly.
-        uint8_t data[] = {FS_CMD_AUTH, 0x02, 0x03}; // needs rest of pin
+        uint8_t data[] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
+        pin.getBytes(&data[2],4);
         _flowRemoteChar->writeValue(pin, true); // 'true' asks for a response
     }
     if (save) {
@@ -124,6 +154,7 @@ void FlowSensorBLE::notifyPair() {
         }
     }
 }
+
 
 
 void FlowSensorBLE::notify() {
@@ -177,7 +208,6 @@ void FlowSensorBLE::notify() {
     if ( (now - _ledSwitch) > 1000 ) {
         _ledSwitch = now;
         _ledOn = !_ledOn;
-
         digitalWrite(BLE_LED_PIN, _ledOn);
     }
     return;
@@ -217,10 +247,10 @@ void FlowSensorBLE::setFlowState(uint8_t state,
     _flowBuffer[pos++] = FS_MAGIC_FLOWSENSOR;
     _flowBuffer[pos++] = state;
 
-    // lat/lon: degrees → 1e-7 degree integer (S32)
+    // FlowSensor readings.
     writeU16(_flowBuffer, pos, flowRateLPM, 0.01, 0xFFFF);  // LPM 0.01
-    writeS16(_flowBuffer, pos, upstreamC, 0.1, 0x7FFF);     // C 0.1
-    writeS16(_flowBuffer, pos, downstreamC, 0.1, 0x7FFF);   // C 0.1
+    writeU16(_flowBuffer, pos, upstreamC-273.15, 0.1, 0x7FFF);     // K 0.1
+    writeU16(_flowBuffer, pos, downstreamC-273.15, 0.1, 0x7FFF);   // K 0.1
     writeU16(_flowBuffer, pos, voltage, 0.01, 0xFFFF);      // V 0.01
     writeU16(_flowBuffer, pos, power, 0.01, 0xFFFF);        // W 0.01
     _flowDirty = true;
