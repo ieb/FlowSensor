@@ -57,17 +57,7 @@ void FlowSensorBLE::begin(const char* deviceName) {
 
 
     // now start the client if it has been paired.
-    Preferences p;
-    if (p.begin("flowble", true)) {
-        String address = p.getString("address", "none");
-        String pin = p.getString("pin", "none");
-        if ( !address.equals("none") && !pin.equals("none")) {
-            pair(address, pin, false);
-        }
-        p.end();
-    }
-
-
+    pair();
 
 }
 
@@ -85,17 +75,20 @@ void FlowSensorBLE::unpair() {
         _remoteClient->disconnect();
         _remoteClient = nullptr;
         _flowRemoteChar = nullptr;
+        status = status & 0xF7; // clear bit 4
+
     }
 }
 
-// Would be better if this was not static, but that would require binding this.
 void FlowSensorBLE::notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (length == 2) {
         if (pData[0] == FS_MAGIC_AUTH_RESP) {
             if (pData[1] == 0x01) {
                 ESP_LOGI(TAG, "Pin code accepted");
+                status = status | 0x10; // set bit 5 
             } else {
                 ESP_LOGE(TAG, "Pin code rejected");
+                status = status & 0xEF; // clear bit 5 not authentcated
             }
         } else {
             ESP_LOGI(TAG, "Unexpected Pin code response");
@@ -113,10 +106,27 @@ void FlowSensorBLE::notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristi
 }
 
 
-void FlowSensorBLE::pair(String &address, String &pin, bool save ) {
+void FlowSensorBLE::pair() {
+    String address = "none";
+    String pin = "none";
+    Preferences p;
+    if (p.begin("flowble", false)) {
+        address = p.getString("address", "none");
+        pin = p.getString("pin", "none");
+        p.end();
+    }
+    if (address.equals("none") || pin.equals("none")) {
+        ESP_LOGI(TAG, "addreess or pin missing, cant pair");
+        return;
+    }    
+
+
+    status = status | 0x04; // set bit 3 configured
     unpair();
+    status = status & 0xE7; // clear bits 4 and 5
     _remoteClient = NimBLEDevice::createClient(NimBLEAddress(address.c_str(), 1));
     _remoteClient->connect();
+    status = status | 0x08; // set bit 4 connected
     NimBLERemoteService* pFlowService = _remoteClient->getService(FM_SERVICE_UUID);
     _flowRemoteChar = pFlowService->getCharacteristic(FM_FLOW_CHAR_UUID);
     // use a lambda to call this, so operatons can be performed if required on the connection.
@@ -130,15 +140,6 @@ void FlowSensorBLE::pair(String &address, String &pin, bool save ) {
         pin.getBytes(&data[2],4);
         _flowRemoteChar->writeValue(pin, true); // 'true' asks for a response
     }
-    if (save) {
-        Preferences p;
-        if (p.begin("flowble", false)) {
-            p.putString("address", address);
-            p.putString("pin", pin);
-            p.end();
-        }
-    }
-
 }
 
 void FlowSensorBLE::notifyPair() {
@@ -241,11 +242,19 @@ static void writeU32(uint8_t* buf, uint8_t &pos, uint32_t val) {
     buf[pos++] = (val >> 24) & 0xFF;
 }
 
-void FlowSensorBLE::setFlowState(uint8_t state, 
+void FlowSensorBLE::setFlowState(sensor_state_t state, 
     float flowRateLPM, float upstreamC, float downstreamC, float voltage, float power) {
     uint8_t pos = 0;
     _flowBuffer[pos++] = FS_MAGIC_FLOWSENSOR;
-    _flowBuffer[pos++] = state;
+
+    if(state == STATE_AIR) {
+        status = (status & 0xFC) | 0x01; 
+    } else if (state == STATE_STILL) {
+        status = (status & 0xFC) | 0x02; 
+    } else if (state == STATE_FLOW) {
+        status = (status & 0xFC) | 0x03; 
+    }
+    _flowBuffer[pos++] = status;
 
     // FlowSensor readings.
     writeU16(_flowBuffer, pos, flowRateLPM, 0.01, 0xFFFF);  // LPM 0.01
@@ -371,6 +380,36 @@ void FlowSensorBLE::handleCommand(uint16_t connHandle, const uint8_t* data, size
     if (!state.authed) {
         ESP_LOGW(TAG, "Client %d cmd 0x%02X rejected — not authenticated", connHandle, cmd);
         return;
+    }
+
+    if ( cmd == FS_CMD_PAIR_MAC ) {
+        String address;
+        for (int i = 0; i < 6; ++i) {
+            char buf[3];
+            sprintf(buf,"%02X", data[i]);
+            address += buf;
+            if ( i < 5) {
+                address += ':';
+            }
+        }
+        Preferences p;
+        if (p.begin("flowble", true)) {
+            p.putString("address", address);
+            p.end();
+        }
+        pair();
+
+    } else if (cmd == FS_CMD_PAIR_PIN) {
+        String pin;
+        for (int i = 0; i < 4; ++i) {
+            pin += data[i];
+        }
+        Preferences p;
+        if (p.begin("flowble", true)) {
+            p.putString("pin", pin);
+            p.end();
+        }
+        pair();
     }
 
     if (_commandCallback) {

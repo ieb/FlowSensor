@@ -54,17 +54,38 @@ conversions may be required at the recieving end.
 | Offset | Size | Type | Field | Scale/Values |
 |--------|------|------|-------|-------------|
 | 0  | 1 | U8 | magic | `0xDD` |
-| 1  | 1 | U8 | state | FF=UNDEFINED, 1=NO_FLUID, 2=STILL, 4=FLOWING|
+| 1  | 1 | U8 | state | status see below |
 | 2  | 2 | U16 | flowRateLPM | 0.01 lpm (0-650) |  
 | 4  | 2 | U16 | upstreamC | 0.01 K (0-650) |
 | 6  | 2 | U16 | downstreamC | 0.01 K (0-650) |
 | 8  | 2 | U16 | voltage | 0.01 V (0-650) |
 | 10 | 2 | U16 | power | 0.01 W (0-650) |
 
+## State U8
+
+	Bitmap bits 0-1
+	0x01=NO_FLUID 
+	0x02=STILL
+	0x03=FLOWING
+	bit 2 FlowMeter Confgigured (address + pin)
+	bit 3 FlowMeter Paired (address exists)
+	bit 4 FlowMeter authenticated (pin valid)
+
+
 
 ### Commands (0xAA02)
 
-There are no commands other than Auth see above.
+Magic byte: `0xDD`. All commands require prior authentication.
+
+**Flowmeter configuration commands (2 bytes):**
+
+| Cmd | Name | Payload | Unit |
+|-----|------|---------|------|
+| `0x01` | Set FlowMeter Mac Address | byte[6] | BLE MAC Address |
+| `0x02` | Set FlowMeter Pin | byte[4] | PIN |
+
+When both the FlowMeter Mac Address and pin are set, the FlowSensor will try and connect reporting status in the status field of `0xAB01`
+
 
 
 ---

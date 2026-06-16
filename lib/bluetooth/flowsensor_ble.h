@@ -5,6 +5,8 @@
 #include <functional>
 #include <map>
 
+#include "sensor.h"
+
 // GATT UUIDs matching BoatWatch protocol
 #define FS_SERVICE_UUID        "0000ab00-0000-1000-8000-00805f9b34fb"
 #define FS_FLOW_CHAR_UUID      "0000ab01-0000-1000-8000-00805f9b34fb"
@@ -20,7 +22,8 @@
 
 // Command IDs
 #define FS_CMD_AUTH           0xF0
-
+#define FS_CMD_PAIR_MAC       0x01
+#define FS_CMD_PAIR_PIN       0x02
 
 // Notification intervals
 #define FS_MIN_FLOWSENSOR_INTERVAL_MS 500   // max 5s
@@ -53,8 +56,8 @@ public:
     void begin(const char* deviceName);
     void notify();
 
-    // pair with a reemote service
-    void pair(String &address, String &pin, bool save=false);
+    // pair with a remote service
+    void pair();
     // unpair with a reemote service
     void unpair();
     // notify the paired service
@@ -62,7 +65,7 @@ public:
 
 
     // Set autopilot state for next notification
-    void setFlowState(uint8_t state, float flowRateLPM, float upstreamC, float downstreamC, float voltage, float power);
+    void setFlowState(sensor_state_t state, float flowRateLPM, float upstreamC, float downstreamC, float voltage, float power);
 
     bool hasAuthenticatedClients() const;
 
@@ -117,6 +120,7 @@ private:
     unsigned long _lastFlowPairNotify = 0;
     unsigned long _ledSwitch = 0;
     bool _ledOn = false;
+    uint8_t status = 0;
 };
 
 
