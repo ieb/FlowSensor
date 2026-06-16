@@ -124,7 +124,8 @@ Authentication required. Only Authenticated clients receive navigation and engin
 
 ### FlowMeter State (0xAC01)
 
-Write Magic byte: `0xDD`. Payload: 12 bytes. 
+Write Magic byte: `0xDD`. Payload: 13 bytes. 
+Write Command byte: `0x50`. 
 
 Note the NMEA2000 standard for Fluid FLow rate is L/h however, that would limit the maximum
 range to 11l/m in a U16 which, so lpm is being used. If using this datapacket in a NMEA2000 context
@@ -135,12 +136,16 @@ U16 no data (aka sentinals are) 0xFFFF
 | Offset | Size | Type | Field | Scale/Values |
 |--------|------|------|-------|-------------|
 | 0  | 1 | U8 | magic | `0xDD` |
-| 1  | 1 | U8 | state | FF=UNDEFINED, 1=NO_FLUID, 2=STILL, 4=FLOWING|
-| 2  | 2 | U16 | flowRateLPM | 0.01 lpm (0-650) |  
-| 4  | 2 | U16 | upstreamC | 0.01 K (0-650) |
-| 6  | 2 | U16 | downstreamC | 0.01 K (0-650) |
-| 8  | 2 | U16 | voltage | 0.01 V (0-650) |
-| 10 | 2 | U16 | power | 0.01 W (0-650) |
+| 1  | 1 | U8 | magic | `0x50` |
+| 2  | 1 | U8 | state | FF=UNDEFINED, 1=NO_FLUID, 2=STILL, 4=FLOWING|
+| 3  | 2 | U16 | flowRateLPM | 0.01 lpm (0-650) |  
+| 5  | 2 | U16 | upstreamC | 0.01 K (0-650) |
+| 7  | 2 | U16 | downstreamC | 0.01 K (0-650) |
+| 9  | 2 | U16 | voltage | 0.01 V (0-650) |
+| 11 | 2 | U16 | power | 0.01 W (0-650) |
+
+
+
 
 
 

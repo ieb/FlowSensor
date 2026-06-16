@@ -24,6 +24,7 @@
 #define FS_CMD_AUTH           0xF0
 #define FS_CMD_PAIR_MAC       0x01
 #define FS_CMD_PAIR_PIN       0x02
+#define FS_CMD_FLOWMETER_UPDATE 0x50
 
 // Notification intervals
 #define FS_MIN_FLOWSENSOR_INTERVAL_MS 500   // max 5s
@@ -57,11 +58,11 @@ public:
     void notify();
 
     // pair with a remote service
-    void pair();
+    void pairMeter();
     // unpair with a reemote service
-    void unpair();
+    void unpairMeter();
     // notify the paired service
-    void notifyPair();
+    void notifyMeter();
 
 
     // Set autopilot state for next notification
@@ -88,7 +89,7 @@ private:
 
 
     NimBLEClient *_remoteClient = nullptr;
-    NimBLERemoteCharacteristic* _flowRemoteChar = nullptr; 
+    NimBLERemoteCharacteristic* _flowMeterChar = nullptr; 
 
     CommandCallback _commandCallback;
 
@@ -114,10 +115,12 @@ private:
     // FlowStateBuffer state buffer (12 bytes)
     uint8_t _flowBuffer[12] = {0};
     bool _flowDirty = false;
-    bool _flowPairDirty = false;
+    // FlowStateBuffer state buffer (13 bytes)
+    uint8_t _flowMeterBuffer[13] = {0};
+    bool _flowMeterDirty = false;
 
     unsigned long _lastFlowNotify = 0;
-    unsigned long _lastFlowPairNotify = 0;
+    unsigned long _lastFlowMeterNotify = 0;
     unsigned long _ledSwitch = 0;
     bool _ledOn = false;
     uint8_t status = 0;

@@ -57,7 +57,7 @@ void FlowSensorBLE::begin(const char* deviceName) {
 
 
     // now start the client if it has been paired.
-    pair();
+    pairMeter();
 
 }
 
@@ -70,11 +70,11 @@ bool FlowSensorBLE::hasAuthenticatedClients() const {
 
 
 
-void FlowSensorBLE::unpair() {
+void FlowSensorBLE::unpairMeter() {
     if ( _remoteClient != nullptr ) {
         _remoteClient->disconnect();
         _remoteClient = nullptr;
-        _flowRemoteChar = nullptr;
+        _flowMeterChar = nullptr;
         status = status & 0xF7; // clear bit 4
 
     }
@@ -106,7 +106,7 @@ void FlowSensorBLE::notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristi
 }
 
 
-void FlowSensorBLE::pair() {
+void FlowSensorBLE::pairMeter() {
     String address = "none";
     String pin = "none";
     Preferences p;
@@ -122,36 +122,36 @@ void FlowSensorBLE::pair() {
 
 
     status = status | 0x04; // set bit 3 configured
-    unpair();
+    unpairMeter();
     status = status & 0xE7; // clear bits 4 and 5
     _remoteClient = NimBLEDevice::createClient(NimBLEAddress(address.c_str(), 1));
     _remoteClient->connect();
     status = status | 0x08; // set bit 4 connected
     NimBLERemoteService* pFlowService = _remoteClient->getService(FM_SERVICE_UUID);
-    _flowRemoteChar = pFlowService->getCharacteristic(FM_FLOW_CHAR_UUID);
+    _flowMeterChar = pFlowService->getCharacteristic(FM_FLOW_CHAR_UUID);
     // use a lambda to call this, so operatons can be performed if required on the connection.
     auto cb = [this](NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
         this->notifyWrite(pRemoteCharacteristic, pData, length, isNotify);
     };
-    _flowRemoteChar->subscribe(false, cb);
+    _flowMeterChar->subscribe(false, cb);
 
-    if (_flowRemoteChar != nullptr) {
+    if (_flowMeterChar != nullptr) {
         uint8_t data[] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
         pin.getBytes(&data[2],4);
-        _flowRemoteChar->writeValue(pin, true); // 'true' asks for a response
+        _flowMeterChar->writeValue(pin, true); // 'true' asks for a response
     }
 }
 
-void FlowSensorBLE::notifyPair() {
-    if (_flowRemoteChar != nullptr) {
+void FlowSensorBLE::notifyMeter() {
+    if (_flowMeterChar != nullptr) {
         unsigned long now = millis();
-        if ((_flowPairDirty && 
-            (now - _lastFlowPairNotify >= FS_MIN_FLOWSENSOR_INTERVAL_MS)) 
-            || (now - _lastFlowPairNotify >= FS_FLOWSENSOR_INTERVAL_MS)) {
+        if ((_flowMeterDirty && 
+            (now - _lastFlowMeterNotify >= FS_MIN_FLOWSENSOR_INTERVAL_MS)) 
+            || (now - _lastFlowMeterNotify >= FS_FLOWSENSOR_INTERVAL_MS)) {
 
-            _flowRemoteChar->writeValue(_flowBuffer, 12 , false);
-            _lastFlowPairNotify = now;
-            _flowPairDirty = false;
+            _flowMeterChar->writeValue(_flowMeterBuffer, 12 , false);
+            _lastFlowMeterNotify = now;
+            _flowMeterDirty = false;
         }
     }
 }
@@ -263,7 +263,31 @@ void FlowSensorBLE::setFlowState(sensor_state_t state,
     writeU16(_flowBuffer, pos, voltage, 0.01, 0xFFFF);      // V 0.01
     writeU16(_flowBuffer, pos, power, 0.01, 0xFFFF);        // W 0.01
     _flowDirty = true;
-    _flowPairDirty = true;
+
+
+    // update the flow meter buffer, which contans the cmd as well as the data.
+    pos = 0;
+    _flowMeterBuffer[pos++] = FS_MAGIC_FLOWSENSOR;
+    _flowMeterBuffer[pos++] = FS_CMD_FLOWMETER_UPDATE;
+
+    if(state == STATE_AIR) {
+        status = (status & 0xFC) | 0x01; 
+    } else if (state == STATE_STILL) {
+        status = (status & 0xFC) | 0x02; 
+    } else if (state == STATE_FLOW) {
+        status = (status & 0xFC) | 0x03; 
+    }
+    _flowMeterBuffer[pos++] = status;
+
+    // FlowSensor readings.
+    writeU16(_flowMeterBuffer, pos, flowRateLPM, 0.01, 0xFFFF);  // LPM 0.01
+    writeU16(_flowMeterBuffer, pos, upstreamC-273.15, 0.1, 0x7FFF);     // K 0.1
+    writeU16(_flowMeterBuffer, pos, downstreamC-273.15, 0.1, 0x7FFF);   // K 0.1
+    writeU16(_flowMeterBuffer, pos, voltage, 0.01, 0xFFFF);      // V 0.01
+    writeU16(_flowMeterBuffer, pos, power, 0.01, 0xFFFF);        // W 0.01
+
+
+    _flowMeterDirty = true;
 }
 
 
@@ -397,7 +421,7 @@ void FlowSensorBLE::handleCommand(uint16_t connHandle, const uint8_t* data, size
             p.putString("address", address);
             p.end();
         }
-        pair();
+        pairMeter();
 
     } else if (cmd == FS_CMD_PAIR_PIN) {
         String pin;
@@ -409,7 +433,7 @@ void FlowSensorBLE::handleCommand(uint16_t connHandle, const uint8_t* data, size
             p.putString("pin", pin);
             p.end();
         }
-        pair();
+        pairMeter();
     }
 
     if (_commandCallback) {

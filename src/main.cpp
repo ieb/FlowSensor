@@ -37,7 +37,7 @@ void setup() {
 void loop() {
 	sensor.read();
 	bleServer.notify();
-	bleServer.notifyPair();
+	bleServer.notifyMeter();
 }
 
 
