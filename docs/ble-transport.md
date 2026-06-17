@@ -32,7 +32,7 @@ FlowSensor notifications require authentication. After subscribing to notificati
 
 | Offset | Size | Type | Field | Value |
 |--------|------|------|-------|-------|
-| 0 | 1 | U8 | magic | `0xDD` |
+| 0 | 1 | U8 | magic | `0xEE` |
 | 1 | 1 | U8 | cmd | `0xF0` (AUTH) |
 | 2 | 4 | char[4] | PIN | ASCII digits, e.g. `"0000"` |
 
@@ -40,12 +40,12 @@ The firmware responds with an auth result notification on both `0xAA01` and `0xA
 
 | Offset | Size | Type | Field | Value |
 |--------|------|------|-------|-------|
-| 0 | 1 | U8 | magic | `0xDD` |
+| 0 | 1 | U8 | magic | `0xEE` |
 | 1 | 1 | U8 | result | `0x01` = accepted, `0x00` = denied |
 
 ### FlowSensor State (0xAB01)
 
-Magic byte: `0xDD`. Payload: 12 bytes. Update rate: every 5 seconds or on change.
+Magic byte: `0xEE`. Payload: 12 bytes. Update rate: every 5 seconds or on change.
 
 Note the NMEA2000 standard for Fluid FLow rate is L/h however, that would limit the maximum
 range to 11l/m in a U16 which, so lpm is being used. If using this datapacket in a NMEA2000 context
@@ -53,7 +53,7 @@ conversions may be required at the recieving end.
 
 | Offset | Size | Type | Field | Scale/Values |
 |--------|------|------|-------|-------------|
-| 0  | 1 | U8 | magic | `0xDD` |
+| 0  | 1 | U8 | magic | `0xEE` |
 | 1  | 1 | U8 | state | status see below |
 | 2  | 2 | U16 | flowRateLPM | 0.01 lpm (0-650) |  
 | 4  | 2 | U16 | upstreamC | 0.01 K (0-650) |
@@ -75,7 +75,7 @@ conversions may be required at the recieving end.
 
 ### Commands (0xAA02)
 
-Magic byte: `0xDD`. All commands require prior authentication.
+Magic byte: `0xEE`. All commands require prior authentication.
 
 **Flowmeter configuration commands (2 bytes):**
 
@@ -109,7 +109,7 @@ FlowMeter writes require authentication. Before writing data, write an auth comm
 
 | Offset | Size | Type | Field | Value |
 |--------|------|------|-------|-------|
-| 0 | 1 | U8 | magic | `0xDD` |
+| 0 | 1 | U8 | magic | `0xEE` |
 | 1 | 1 | U8 | cmd | `0xF0` (AUTH) |
 | 2 | 4 | char[4] | PIN | ASCII digits, e.g. `"0000"` |
 
@@ -117,14 +117,14 @@ The firmware responds with an auth result notification on both `0xAA01` and `0xA
 
 | Offset | Size | Type | Field | Value |
 |--------|------|------|-------|-------|
-| 0 | 1 | U8 | magic | `0xDD` |
+| 0 | 1 | U8 | magic | `0xEE` |
 | 1 | 1 | U8 | result | `0x01` = accepted, `0x00` = denied |
 
 Authentication required. Only Authenticated clients receive navigation and engine data.
 
 ### FlowMeter State (0xAC01)
 
-Write Magic byte: `0xDD`. Payload: 13 bytes. 
+Write Magic byte: `0xEE`. Payload: 13 bytes. 
 Write Command byte: `0x50`. 
 
 Note the NMEA2000 standard for Fluid FLow rate is L/h however, that would limit the maximum
@@ -135,9 +135,9 @@ U16 no data (aka sentinals are) 0xFFFF
 
 | Offset | Size | Type | Field | Scale/Values |
 |--------|------|------|-------|-------------|
-| 0  | 1 | U8 | magic | `0xDD` |
+| 0  | 1 | U8 | magic | `0xEE` |
 | 1  | 1 | U8 | magic | `0x50` |
-| 2  | 1 | U8 | state | FF=UNDEFINED, 1=NO_FLUID, 2=STILL, 4=FLOWING|
+| 2  | 1 | U8 | status | See Status U8 |
 | 3  | 2 | U16 | flowRateLPM | 0.01 lpm (0-650) |  
 | 5  | 2 | U16 | upstreamC | 0.01 K (0-650) |
 | 7  | 2 | U16 | downstreamC | 0.01 K (0-650) |

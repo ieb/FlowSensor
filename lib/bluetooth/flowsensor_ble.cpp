@@ -257,11 +257,11 @@ void FlowSensorBLE::setFlowState(sensor_state_t state,
     _flowBuffer[pos++] = status;
 
     // FlowSensor readings.
-    writeU16(_flowBuffer, pos, flowRateLPM, 0.01, 0xFFFF);  // LPM 0.01
-    writeU16(_flowBuffer, pos, upstreamC-273.15, 0.1, 0x7FFF);     // K 0.1
-    writeU16(_flowBuffer, pos, downstreamC-273.15, 0.1, 0x7FFF);   // K 0.1
-    writeU16(_flowBuffer, pos, voltage, 0.01, 0xFFFF);      // V 0.01
-    writeU16(_flowBuffer, pos, power, 0.01, 0xFFFF);        // W 0.01
+    writeU16(_flowBuffer, pos, flowRateLPM, 100.0, 0xFFFF);  // LPM 0.01
+    writeU16(_flowBuffer, pos, upstreamC+273.15, 100.0, 0x7FFF);     // K 0.01
+    writeU16(_flowBuffer, pos, downstreamC+273.15, 100.0, 0x7FFF);   // K 0.01
+    writeU16(_flowBuffer, pos, voltage, 100.0, 0xFFFF);      // V 0.01
+    writeU16(_flowBuffer, pos, power, 100.0, 0xFFFF);        // W 0.01
     _flowDirty = true;
 
 
@@ -280,11 +280,11 @@ void FlowSensorBLE::setFlowState(sensor_state_t state,
     _flowMeterBuffer[pos++] = status;
 
     // FlowSensor readings.
-    writeU16(_flowMeterBuffer, pos, flowRateLPM, 0.01, 0xFFFF);  // LPM 0.01
-    writeU16(_flowMeterBuffer, pos, upstreamC-273.15, 0.1, 0x7FFF);     // K 0.1
-    writeU16(_flowMeterBuffer, pos, downstreamC-273.15, 0.1, 0x7FFF);   // K 0.1
-    writeU16(_flowMeterBuffer, pos, voltage, 0.01, 0xFFFF);      // V 0.01
-    writeU16(_flowMeterBuffer, pos, power, 0.01, 0xFFFF);        // W 0.01
+    writeU16(_flowMeterBuffer, pos, flowRateLPM, 100.0, 0xFFFF);  // LPM 0.01
+    writeU16(_flowMeterBuffer, pos, upstreamC+273.15, 100.0, 0x7FFF);     // K 0.1
+    writeU16(_flowMeterBuffer, pos, downstreamC+273.15, 100.0, 0x7FFF);   // K 0.1
+    writeU16(_flowMeterBuffer, pos, voltage, 100.0, 0xFFFF);      // V 0.01
+    writeU16(_flowMeterBuffer, pos, power, 100.0, 0xFFFF);        // W 0.01
 
 
     _flowMeterDirty = true;

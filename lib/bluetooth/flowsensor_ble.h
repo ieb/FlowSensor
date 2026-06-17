@@ -17,7 +17,7 @@
 
 
 // Binary protocol constants
-#define FS_MAGIC_FLOWSENSOR 0xDD
+#define FS_MAGIC_FLOWSENSOR 0xEE
 #define FS_MAGIC_AUTH_RESP 0xAF
 
 // Command IDs
