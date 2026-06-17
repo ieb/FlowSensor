@@ -62,6 +62,7 @@ static const float flow_lut[][2] = {   /* {power W, l/min} */
 #ifndef HEATER_PWM_PIN
 #define HEATER_PWM_PIN GPIO_NUM_10
 #endif
+#define HEATER_PWM_CH 0          /* LEDC channel the heater is attached to */
 #define PWM_BITS 10
 #define PWM_FREQUENCY 500
 
@@ -113,11 +114,25 @@ static void adc_init() {
 static float adc_volts(adc1_channel_t ch) {
   uint32_t acc = 0;
   for (int i = 0; i < OVERSAMPLE; i++) acc += adc1_get_raw(ch); /* eFuse/2-pt calibrated */
-  return 0.001 * esp_adc_cal_raw_to_voltage(acc / OVERSAMPLE, &adc1_chars);                    /* uses eFuse Vref */
+  uint32_t raw = acc / OVERSAMPLE;
+  uint32_t mv;
+  if (cali_enable) {
+    mv = esp_adc_cal_raw_to_voltage(raw, &adc1_chars);          /* uses eFuse Vref */
+  } else {
+    /* No calibration eFuse: adc1_chars is uninitialised, so approximate with the
+       nominal full-scale for 12 dB attenuation (~3.3 V over the 12-bit range). */
+    mv = (uint32_t)((raw / 4095.0f) * 3300.0f);
+  }
+  return 0.001f * mv;
 }
 
 /* NTC divider voltage -> temperature (Beta model). Vadc = Vexc*Rs/(Rs+Rntc) */
 float FlowSensor::temp_from_divider(float vadc) {
+  /* Clamp away from the rails so an open (vadc->V_EXC) or shorted (vadc->0) NTC
+     can't divide by zero / take log of zero and yield inf/NaN temperatures. */
+  const float eps = 1e-3f;
+  if (vadc < eps)          vadc = eps;
+  if (vadc > V_EXC - eps)  vadc = V_EXC - eps;
   float rntc = R_SERIES * vadc / (V_EXC - vadc);
   float invT = 1.0f/298.15f + logf(rntc / NTC_R25) / NTC_BETA;
   return 1.0f/invT - 273.15f;
@@ -128,14 +143,15 @@ float FlowSensor::temp_from_divider(float vadc) {
 void FlowSensor::control_tick(float dt) {
   float t_up = temp_from_divider(adc_volts(REFERENCE_NTC_ADC));   /* upstream / fluid ref */
   float t_dn = temp_from_divider(adc_volts(HEATED_NTC_ADC));   /* downstream element   */
-  voltage = 0.001 * VBUS_DIV* adc_volts(VOLTAGE_ADC);           /* measured 12V bus (P ~ V^2!) */
+  voltage = VBUS_DIV * adc_volts(VOLTAGE_ADC);                 /* measured 12V bus (P ~ V^2!) — adc_volts() already returns volts */
   float err  = (t_up + DELTA_T) - t_dn;              /* T_target - T_dn */
   float u    = KP*err + KI*pi_integ;                 /* software PI */
   heaterDuty = u < 0 ? 0 : (u > 1 ? 1 : u);          /* clamp 0..1 */
   pi_integ  += (err + (heaterDuty - u)/KI) * dt;           /* back-calculation anti-windup */
-  ledcWrite(HEATER_PWM_PIN, (uint32_t)(heaterDuty * ((1<<PWM_BITS)-1)));
+  ledcWrite(HEATER_PWM_CH, (uint32_t)(heaterDuty * ((1<<PWM_BITS)-1)));
   powerLevel = heaterDuty * voltage * voltage / R_HEATER;        /* flow signal: P = duty*Vbus^2/R */
   upstreamTemperatureC = t_up;
+  heatedTemperatureC = t_dn;
 }
 
 void FlowSensor::classify() {
@@ -191,15 +207,15 @@ void FlowSensor::begin() {
   // setup adc1
   adc_init();
   // setup ledc
-  ledcSetup(0, PWM_FREQUENCY, PWM_BITS);
-  ledcAttachPin(HEATER_PWM_PIN, 0);
+  ledcSetup(HEATER_PWM_CH, PWM_FREQUENCY, PWM_BITS);
+  ledcAttachPin(HEATER_PWM_PIN, HEATER_PWM_CH);
   ESP_LOGI(TAG, "Flow Sensor setup");
 }
 
 void FlowSensor::read() {
   unsigned long now = millis();
   if ( now-lastRead > (1000) ) {
-    float period = (now-lastRead)/1000; 
+    float period = (now-lastRead)/1000.0f;   /* seconds, keep fractional part */
     lastRead = now;
     control_tick(period);
     classify();

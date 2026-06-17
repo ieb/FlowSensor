@@ -26,6 +26,12 @@
 #define FS_CMD_PAIR_PIN       0x02
 #define FS_CMD_FLOWMETER_UPDATE 0x50
 
+// Status byte bit layout (0xAB01 state field and the FlowMeter frame)
+#define FS_STATUS_STATE_MASK  0x03   // bits 0-1: 1=NO_FLUID, 2=STILL, 3=FLOWING
+#define FS_STATUS_CONFIGURED  0x04   // bit 2: remote address + pin set
+#define FS_STATUS_PAIRED      0x08   // bit 3: connected to remote FlowMeter
+#define FS_STATUS_AUTHED      0x10   // bit 4: remote FlowMeter auth accepted
+
 // Notification intervals
 #define FS_MIN_FLOWSENSOR_INTERVAL_MS 500   // max 5s
 #define FS_FLOWSENSOR_INTERVAL_MS 5000
@@ -118,6 +124,10 @@ private:
     // FlowStateBuffer state buffer (13 bytes)
     uint8_t _flowMeterBuffer[13] = {0};
     bool _flowMeterDirty = false;
+
+    // Set from begin() and from BLE write callbacks so the actual (blocking)
+    // pairing connect runs from the main loop, never from the NimBLE host task.
+    bool _pairRequested = false;
 
     unsigned long _lastFlowNotify = 0;
     unsigned long _lastFlowMeterNotify = 0;

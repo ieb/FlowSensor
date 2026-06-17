@@ -56,8 +56,9 @@ void FlowSensorBLE::begin(const char* deviceName) {
 
 
 
-    // now start the client if it has been paired.
-    pairMeter();
+    // Defer the (blocking) pairing connect to the main loop so it never stalls
+    // boot or runs from a BLE callback.
+    _pairRequested = true;
 
 }
 
@@ -72,11 +73,12 @@ bool FlowSensorBLE::hasAuthenticatedClients() const {
 
 void FlowSensorBLE::unpairMeter() {
     if ( _remoteClient != nullptr ) {
-        _remoteClient->disconnect();
+        // deleteClient disconnects and frees the client object (disconnect()
+        // alone leaks it, so repeated pair attempts would exhaust memory).
+        NimBLEDevice::deleteClient(_remoteClient);
         _remoteClient = nullptr;
         _flowMeterChar = nullptr;
-        status = status & 0xF7; // clear bit 4
-
+        status &= ~(FS_STATUS_PAIRED | FS_STATUS_AUTHED);
     }
 }
 
@@ -85,10 +87,10 @@ void FlowSensorBLE::notifyWrite(NimBLERemoteCharacteristic* pRemoteCharacteristi
         if (pData[0] == FS_MAGIC_AUTH_RESP) {
             if (pData[1] == 0x01) {
                 ESP_LOGI(TAG, "Pin code accepted");
-                status = status | 0x10; // set bit 5 
+                status |= FS_STATUS_AUTHED;
             } else {
                 ESP_LOGE(TAG, "Pin code rejected");
-                status = status & 0xEF; // clear bit 5 not authentcated
+                status &= ~FS_STATUS_AUTHED;
             }
         } else {
             ESP_LOGI(TAG, "Unexpected Pin code response");
@@ -116,35 +118,64 @@ void FlowSensorBLE::pairMeter() {
         p.end();
     }
     if (address.equals("none") || pin.equals("none")) {
-        ESP_LOGI(TAG, "addreess or pin missing, cant pair");
+        ESP_LOGI(TAG, "address or pin missing, cant pair");
         return;
-    }    
+    }
+    if (pin.length() < 4) {
+        ESP_LOGE(TAG, "stored pin too short (%u), cant pair", (unsigned)pin.length());
+        return;
+    }
 
 
-    status = status | 0x04; // set bit 3 configured
+    status |= FS_STATUS_CONFIGURED;
     unpairMeter();
-    status = status & 0xE7; // clear bits 4 and 5
+    status &= ~(FS_STATUS_PAIRED | FS_STATUS_AUTHED);
+
     _remoteClient = NimBLEDevice::createClient(NimBLEAddress(address.c_str(), 1));
-    _remoteClient->connect();
-    status = status | 0x08; // set bit 4 connected
+    // connect() blocks until success or timeout; bail out cleanly on failure so
+    // a missing/un-advertising FlowMeter can't crash or boot-loop the device.
+    if (!_remoteClient->connect()) {
+        ESP_LOGE(TAG, "Failed to connect to FlowMeter %s", address.c_str());
+        unpairMeter();
+        return;
+    }
+    status |= FS_STATUS_PAIRED;
+
     NimBLERemoteService* pFlowService = _remoteClient->getService(FM_SERVICE_UUID);
+    if (pFlowService == nullptr) {
+        ESP_LOGE(TAG, "FlowMeter service not found on %s", address.c_str());
+        unpairMeter();
+        return;
+    }
     _flowMeterChar = pFlowService->getCharacteristic(FM_FLOW_CHAR_UUID);
+    if (_flowMeterChar == nullptr) {
+        ESP_LOGE(TAG, "FlowMeter characteristic not found on %s", address.c_str());
+        unpairMeter();
+        return;
+    }
+
     // use a lambda to call this, so operatons can be performed if required on the connection.
     auto cb = [this](NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
         this->notifyWrite(pRemoteCharacteristic, pData, length, isNotify);
     };
     _flowMeterChar->subscribe(true, cb);
 
-    if (_flowMeterChar != nullptr) {
-        // Auth frame: [magic][AUTH cmd][4 ASCII PIN digits]. Send the whole
-        // frame (not just the PIN) so the remote FlowMeter can authenticate us.
-        uint8_t data[6] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
-        memcpy(&data[2], pin.c_str(), 4);
-        _flowMeterChar->writeValue(data, sizeof(data), true); // 'true' asks for a response
-    }
+    // Auth frame: [magic][AUTH cmd][4 ASCII PIN digits]. Send the whole
+    // frame (not just the PIN) so the remote FlowMeter can authenticate us.
+    uint8_t data[6] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
+    memcpy(&data[2], pin.c_str(), 4);
+    _flowMeterChar->writeValue(data, sizeof(data), true); // 'true' asks for a response
 }
 
 void FlowSensorBLE::notifyMeter() {
+    // Run the (blocking) pairing connect here, in the main-loop context, rather
+    // than from begin()/setup() or a BLE host callback where it could stall or
+    // deadlock the host task.
+    if (_pairRequested) {
+        _pairRequested = false;
+        pairMeter();
+    }
+
     if (_flowMeterChar != nullptr) {
         unsigned long now = millis();
         if ((_flowMeterDirty && 
@@ -250,11 +281,11 @@ void FlowSensorBLE::setFlowState(sensor_state_t state,
     _flowBuffer[pos++] = FS_MAGIC_FLOWSENSOR;
 
     if(state == STATE_AIR) {
-        status = (status & 0xFC) | 0x01; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x01; 
     } else if (state == STATE_STILL) {
-        status = (status & 0xFC) | 0x02; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x02; 
     } else if (state == STATE_FLOW) {
-        status = (status & 0xFC) | 0x03; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x03; 
     }
     _flowBuffer[pos++] = status;
 
@@ -273,11 +304,11 @@ void FlowSensorBLE::setFlowState(sensor_state_t state,
     _flowMeterBuffer[pos++] = FS_CMD_FLOWMETER_UPDATE;
 
     if(state == STATE_AIR) {
-        status = (status & 0xFC) | 0x01; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x01; 
     } else if (state == STATE_STILL) {
-        status = (status & 0xFC) | 0x02; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x02; 
     } else if (state == STATE_FLOW) {
-        status = (status & 0xFC) | 0x03; 
+        status = (status & ~FS_STATUS_STATE_MASK) | 0x03; 
     }
     _flowMeterBuffer[pos++] = status;
 
@@ -409,33 +440,39 @@ void FlowSensorBLE::handleCommand(uint16_t connHandle, const uint8_t* data, size
     }
 
     if ( cmd == FS_CMD_PAIR_MAC ) {
-        String address;
-        for (int i = 0; i < 6; ++i) {
-            char buf[3];
-            sprintf(buf,"%02X", data[i]);
-            address += buf;
-            if ( i < 5) {
-                address += ':';
-            }
+        // Frame is [magic][cmd][6 MAC bytes]; the address starts at data[2] in
+        // display order (most-significant octet first, e.g. AA BB CC DD EE FF
+        // for AA:BB:CC:DD:EE:FF). NimBLEAddress formats it the same way.
+        if (len < 8) {
+            ESP_LOGW(TAG, "PAIR_MAC too short (%u)", (unsigned)len);
+            return;
         }
+        String address = NimBLEAddress(data + 2, 1).toString().c_str();
         Preferences p;
-        if (p.begin("flowble", true)) {
+        if (p.begin("flowble", false)) {   // read-write so putString persists
             p.putString("address", address);
             p.end();
         }
-        pairMeter();
+        // Defer the connect to the main loop (see notifyMeter); never connect
+        // from this BLE host-callback context.
+        _pairRequested = true;
 
     } else if (cmd == FS_CMD_PAIR_PIN) {
+        // Frame is [magic][cmd][4 ASCII PIN digits]; the PIN starts at data[2].
+        if (len < 6) {
+            ESP_LOGW(TAG, "PAIR_PIN too short (%u)", (unsigned)len);
+            return;
+        }
         String pin;
         for (int i = 0; i < 4; ++i) {
-            pin += data[i];
+            pin += (char)data[2 + i];   // append the ASCII digit, not its decimal value
         }
         Preferences p;
-        if (p.begin("flowble", true)) {
+        if (p.begin("flowble", false)) {   // read-write so putString persists
             p.putString("pin", pin);
             p.end();
         }
-        pairMeter();
+        _pairRequested = true;
     }
 
     if (_commandCallback) {

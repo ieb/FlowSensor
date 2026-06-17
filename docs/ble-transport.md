@@ -84,7 +84,11 @@ Magic byte: `0xEE`. All commands require prior authentication.
 | Cmd | Name | Payload | Unit |
 |-----|------|---------|------|
 | `0x01` | Set FlowMeter Mac Address | byte[6] | BLE MAC Address |
-| `0x02` | Set FlowMeter Pin | byte[4] | PIN |
+| `0x02` | Set FlowMeter Pin | byte[4] | PIN (ASCII digits) |
+
+The MAC address payload is the 6 address bytes in **display order** — most-significant
+octet first, i.e. the bytes read left-to-right as the address is written. For
+`AA:BB:CC:DD:EE:FF` the payload is `AA BB CC DD EE FF`.
 
 When both the FlowMeter Mac Address and pin are set, the FlowSensor will try and connect reporting status in the status field of `0xAB01`
 
