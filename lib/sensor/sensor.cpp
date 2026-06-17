@@ -5,6 +5,9 @@
 #include "esp_adc_cal.h"
 #include "esp_log.h"
 
+#ifndef ADC_ATTEN_DB_12
+#define ADC_ATTEN_DB_12 ADC_ATTEN_DB_11
+#endif
 
 
 /* Auto-derived from the model — Probe (head+shaft), ΔT=10C,

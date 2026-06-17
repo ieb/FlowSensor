@@ -133,12 +133,14 @@ void FlowSensorBLE::pairMeter() {
     auto cb = [this](NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
         this->notifyWrite(pRemoteCharacteristic, pData, length, isNotify);
     };
-    _flowMeterChar->subscribe(false, cb);
+    _flowMeterChar->subscribe(true, cb);
 
     if (_flowMeterChar != nullptr) {
-        uint8_t data[] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
-        pin.getBytes(&data[2],4);
-        _flowMeterChar->writeValue(pin, true); // 'true' asks for a response
+        // Auth frame: [magic][AUTH cmd][4 ASCII PIN digits]. Send the whole
+        // frame (not just the PIN) so the remote FlowMeter can authenticate us.
+        uint8_t data[6] = {FS_MAGIC_FLOWSENSOR, FS_CMD_AUTH, 0x00, 0x00, 0x00, 0x00};
+        memcpy(&data[2], pin.c_str(), 4);
+        _flowMeterChar->writeValue(data, sizeof(data), true); // 'true' asks for a response
     }
 }
 
@@ -149,7 +151,7 @@ void FlowSensorBLE::notifyMeter() {
             (now - _lastFlowMeterNotify >= FS_MIN_FLOWSENSOR_INTERVAL_MS)) 
             || (now - _lastFlowMeterNotify >= FS_FLOWSENSOR_INTERVAL_MS)) {
 
-            _flowMeterChar->writeValue(_flowMeterBuffer, 12 , false);
+            _flowMeterChar->writeValue(_flowMeterBuffer, sizeof(_flowMeterBuffer), false);
             _lastFlowMeterNotify = now;
             _flowMeterDirty = false;
         }
