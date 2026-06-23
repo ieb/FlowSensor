@@ -1,5 +1,11 @@
 # Flow Sensor
 
+## Status
+
+This project has got to the state of building a prototype sensor, but testing has indicated that measuring the temperature and rate of change of temperature of the exaust elbow on a water cooled exhaust relative to the engine coolant temperature is a very effective early warning system. The heat source, engine exhaust is in the kw range. The cooling source is the same, when the cooling source reduces the temperature of the water cooled elbo rises rapidly triggering an alarm within 5s, evidenced by live data recorded from 2 engine overheats, one slow and one fast. On that basis, I am not taking this project further. See N2KEngine project for more details.
+
+## Intro
+
 The aim is to build a simple temperature difussion flow sensor to monitor and warn about conditions that would permanently damage a impeller pump as used on raw water cooling for marine engines. In my case a Volvo Penta D2-40 which has a F4B-9 pump prone to running dry as a result of suction caused by the boat when sailing. If these pumps run dry for more than 30s as can happend on startup, they overhead and fail with broken vanes and damaged sealing. When they are unable to overcome the back pressure from the wet exaust system, the engine rapidly overheats within a few miniutes. The F4B pumps are more susceptable than the larger models becuase they only have 6 impeller vanes so if only 1 fails the seal is broken and they suck dry when sailing above 8kn. The service life is less than 50h although the manual states 500h or once yearly. Failure can happen at any time, typically preceded by lower flow levels when running.
 
 * Minimal reduction in flow
